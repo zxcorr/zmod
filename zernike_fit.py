@@ -202,6 +202,7 @@ def grasp_spher_grd_file(filename, shift_center=True, verbose=False):
 			co_2 = co_real**2 + co_imag**2
 			
 			max_point = np.where(co_2==max(co_2))[0][0]    # Selects the first maximum found
+			#max_point = np.unravel_index(np.argmax(co_2, axis=None), co_2.shape)
 			grid_center[f] = [0,0]
 			
 			grid_center[f][0] = grid_lim[f][0] + (max_point%Npoints[f][0])*(grid_lim[f][2]-grid_lim[f][0])/(Npoints[f][0]-1)
@@ -271,7 +272,7 @@ def dualcut_file(file_name):
 
 
 
-def fits_writing(filename, coefficients, freqs):
+def fits_writing(filename, coefficients, freqs, R):
 	'''
 	This function receives a filename, a (Nfreq x Ncoeff x 3)
 	coefficients array,	a frequency list, and writes the data
@@ -623,7 +624,46 @@ def spherical_arccos(a,b,c):
 	
 
 
-#def uv_integrate(data): pass
+def uv_integrate(data, thetas_matrix, Npoints, grid_lim):
+	'''
+	This function integrates a dataset over u and then over v.
+	The data must be given in a matrix format.
+	
+	The jacobian in terms of theta-phi is 
+	sin(theta)*d(theta)*d(phi) = cos(theta)*du*dv
+	'''
+	
+	try: data[data.mask==1] = 0 # taking out masked elements
+	except: pass
+	
+	from scipy.integrate import simps
+
+	jacob = 1/np.cos(thetas_matrix)
+	uv_area = (grid_lim[3]-grid_lim[1])*(grid_lim[2]-grid_lim[0])
+	data = data*jacob
+	data_max = np.max(data)
+	
+	# This method seems to have an intrinsic error
+	#I_u = [simps(data[i,:]**2, np.linspace(grid_lim[0],grid_lim[2],Npoints[0])) for i in range(Npoints[1])]
+	#I_uv =  simps(I_u, np.linspace(grid_lim[1],grid_lim[3],Npoints[1]))
+	
+	
+	# 2D Monte Carlo integration
+	
+	N = 100 # number of tries per pixel
+	total = N*Npoints[0]*Npoints[1]
+	counts = 0
+	samples = data_max*np.random.rand(Npoints[0],Npoints[1],N)
+
+	for i in range(Npoints[0]):
+		for j in range(Npoints[1]):
+			y = data[i][j]
+			counts += np.sum(samples[i,j,:]<=y)
+
+	fraction = counts/total
+	I_uv = data_max * uv_area * fraction
+	
+	return I_uv
 
 			 
 			   
@@ -842,151 +882,6 @@ def gauss_2d_wrapper(radius=-1):
 		
 	return gauss_2d
 
-
-
-def gaussian_fit(data, polar_coordinates, thetaphi_coordinates, radius, verbose=False, show_plots=False):
-
-	######
-	
-	
-	#print("Collecting data")
-	
-	#cols, grid_lims, grid_centers, Nps, freqs = zk.grasp_spher_grd_file(filename, shift_center=True, verbose=False)
-	
-	#x0 = Nps[0][1]//2-1
-	#yi = x0*Nps[0][0]
-	#dy = int(0.5*Nps[0][0]/2)
-	#yf = x0+dy
-	
-	
-	#cols = cols[0]
-	
-	#radius = 0.01
-	
-	#print("Making grid")
-	
-	#data = np.sqrt(cols[:,0]**2 + cols[:,1]**2)
-	#coordinates = zk.polar_uv_grid(grid_lims[0], Nps[0],grid_centers[0])
-	
-	data = np.where(polar_coordinates[:,0]**2<=radius**2,data,0)
-	
-	
-	####
-	
-	x = polar_coordinates[:,0]*np.cos(polar_coordinates[:,1])
-	y = polar_coordinates[:,0]*np.sin(polar_coordinates[:,1])
-	
-	# matrices
-	X,Y,Data = x.reshape(Nps[0]), y.reshape(Nps[0]), data.reshape(Nps[0])
-	
-	A_est, mu_x_est, mu_y_est, sigma_est = np.max(data),0,0,0
-
-	if verbose: print("Starting analysis...")
-
-	from scipy.optimize import curve_fit
-	popt, pcov = curve_fit(gauss_2d_wrapper(radius), (x,y), data, p0=[A_est, mu_x_est, mu_y_est, sigma_est])
-
-	if verbose:
-		print("Parametros (A, mu_x, mu_y, sigma):\n",popt)
-		print("Cov:\n",pcov)
-
-	z_fit = gauss_2d_wrapper(radius)((x,y), popt[0],popt[1],popt[2],popt[3])
-	z_res = z_fit-data
-
-
-
-
-	# Reconstructed Power Fraction
-	
-	# Here, we integrate over u and then over v.
-	# The jacobian in terms of theta-phi is 
-	# sin(theta)*d(theta)*d(phi) = cos(theta)*du*dv
-	
-	from scipy.integrate import simps
-	
-	# Multiplying data for cos(theta) before integrating
-	jacobian = np.cos(thetaphi_coordinates[:,0]).reshape((Npoints[0],Npoints[1]))
-	gauss_jacob = z_fit_matrix*jacobian
-	
-	
-	#if interp_factor<=1:
-	P1_u = [simps(data_jacob[i,:]**2, np.linspace(grid_lim[0],grid_lim[2],Npoints[0])) for i in range(Npoints[1])]
-	P_original =  k**2*simps(P1_u, np.linspace(grid_lim[1],grid_lim[3],Npoints[1]))
-
-
-
-
-	# PLOTS
-	
-	if show_plots:
-
-
-		# cut
-		# x fixo
-		
-		#x0 = Npoints[1]//2-1
-		#yi = x0*Npoints[0]
-		#dy = int(0.5*Npoints[0]/2)
-		#yf = x0+dy
-		
-		#print(list(y[yi:yf]).sort())
-		
-		#fig = plt.figure(0)
-		#ax1 = fig.add_subplot(211)
-		#ax1.scatter(y[yi:yf], data[yi:yf]  , c="black")
-		#ax1.scatter(y[yi:yf], z_fit[yi:yf], c="b")
-		#ax1.scatter(y[yi:yf,1], z_res[yi:yf], c="g")
-		
-		#ax2 = fig.add_subplot(212)
-		#ax2.scatter(y[yi:yf], z_res[yi:yf], c="r")
-		#plt.show()
-		
-		
-
-		X = x.reshape(Npoints)
-		Y = y.reshape(Npoints)
-		data  = data.reshape(Npoints)
-		z_fit = z_fit.reshape(Npoints)
-		z_res = z_res.reshape(Npoints)
-		
-		
-		plot_2d = True
-		if plot_2d:
-		
-			fig, axs = plt.subplots(ncols=3, sharex=True, sharey=True, figsize=(16,4))
-			
-			#fig.suptitle(r"A = {:.02f}, $\mu_x$ = {:.02f}, $\mu_y$ = {:.02f}, $\sigma$ = {:.02f}".format(popt[0], popt[1], popt[2], popt[3]))
-			
-			c1 = axs[0].pcolormesh(X, Y, data, shading="auto")
-			axs[0].set_title("Electric Field Data")
-			cbar = fig.colorbar(c1, ax=axs[0])
-
-			axs[0].set_xlim(-radius,radius)
-			axs[0].set_ylim(-radius,radius)
-			
-			c3 = axs[1].pcolormesh(X, Y, z_fit, shading="auto")
-			axs[1].set_title("Fit")
-			cbar = fig.colorbar(c3, ax=axs[1])
-			
-			c4 = axs[2].pcolormesh(X, Y, z_res, shading="auto")
-			axs[2].set_title("Residuals")
-			cbar = fig.colorbar(c4, ax=axs[2])
-			
-			plt.show()
-
-		else:
-		
-			fig1, ax1 = plt.subplots(subplot_kw={"projection": "3d"})
-			fig2, ax2 = plt.subplots(subplot_kw={"projection": "3d"})
-			fig3, ax3 = plt.subplots(subplot_kw={"projection": "3d"})
-			
-			ax1.plot_surface(X, Y, data)
-			ax2.plot_surface(X, Y, z_fit)
-			ax3.plot_surface(X, Y, z_res)
-			
-			plt.show()
-			
-		return popt, pcov
 
 
 ######
