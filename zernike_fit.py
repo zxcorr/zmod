@@ -3,14 +3,16 @@
 This program aims to make a numerical fitting of the beam
 calculated by GRASP through the Zernike polynomials.
 
-Created on 20/02/2021
-Last update 10/05/2021
+Created on 2021-02
+Last update 2021-06
 
 Author: João Alberto
 '''
 
 import numpy as np
 from math import factorial
+import matplotlib.pyplot as plt
+plt.rcParams.update({"font.family": "serif", "font.serif": "Times New Roman"})
 
 c = 299792458
 
@@ -51,7 +53,7 @@ def zernike_polynomial(r,theta,beta,alpha):
 	Returns the numerical value of the Zernike polynomials in the 
 	given radius and azimuth (polar coordinates), to chosen values
 	of beta, which is the degree of the radial polynomial, and
-	alpha, which is the azimutal frequency.
+	alpha, which is the azimuthal frequency.
 	'''
 	
 	if beta!=int(beta) or alpha!=int(alpha):
@@ -93,13 +95,17 @@ def remove_spaces(line):
 
 
 
-def grasp_spher_grd_file(filename, shift_center=False, verbose=False):
+def grasp_spher_grd_file(filename, shift_center=True, verbose=False):
 	'''
 	This functions opens a .grd file containing information about
 	the spherical grid and returns the grid limits, the number of
 	points in which the grid is divided, and the columns which
 	contain the values from the field in different points.
 	Ref.: GRASP manual, p. 1060-1066.
+	
+	"shif_center" should always be True, unless you want grid_center
+	to be returned as the center provided in the .grd file (and not
+	at the beam maximum).
 	'''
 
 			
@@ -116,7 +122,7 @@ def grasp_spher_grd_file(filename, shift_center=False, verbose=False):
 	##
 	
 
-	if verbose: print("\nCollecting data from {}".format(file_path))
+	if verbose: print("\nCollecting data from {}".format(filename))
 
 	grd_file = open(filename,"r")
 	
@@ -131,15 +137,13 @@ def grasp_spher_grd_file(filename, shift_center=False, verbose=False):
 	
 	freqs = np.array([float(freqs[i]) for i in range(len(freqs)) if i%2==1 and i!=0])
 	
+	# NSET:  number of field sets or beams.
+	# ICOMP: denotes field components. If NCOMP = 3, linear co and cx components are given.
+	# NCOMP: number of components. If NCOMP = 2, two field components for each point are given.
+	# IGRID: control parameter of field grid type. If IGRID = 1, grid is uv type.
 	config = remove_spaces(grd_file.readline())
 	nset = int(config[0])
 	if config[1:4] != ["3","2","1\n"]:
-	
-		# NSET:  number of field sets or beams.
-		# ICOMP: denotes field components. If NCOMP = 3, linear co and cx components are given.
-		# NCOMP: number of components. If NCOMP = 2, two field components for each point are given.
-		# IGRID: control parameter of field grid type. If IGRID = 1, grid is uv type.
-		
 		if input("Different configurations found (NSET, ICOMP, NCOMP and/or IGRID). Are you sure you want to continue? (y/n)") != "y":
 			print("Stopping execution")
 			return False # arrumar esse return lá embaixo
@@ -197,7 +201,8 @@ def grasp_spher_grd_file(filename, shift_center=False, verbose=False):
 			co_imag = np.array(data)[f][:,1] # Imag co
 			co_2 = co_real**2 + co_imag**2
 			
-			max_point = np.where(co_2==max(co_2))[0][0]
+			max_point = np.where(co_2==max(co_2))[0][0]    # Selects the first maximum found
+			#max_point = np.unravel_index(np.argmax(co_2, axis=None), co_2.shape)
 			grid_center[f] = [0,0]
 			
 			grid_center[f][0] = grid_lim[f][0] + (max_point%Npoints[f][0])*(grid_lim[f][2]-grid_lim[f][0])/(Npoints[f][0]-1)
@@ -267,7 +272,7 @@ def dualcut_file(file_name):
 
 
 
-def fits_writing(filename, coefficients, freqs):
+def fits_writing(filename, coefficients, freqs, R):
 	'''
 	This function receives a filename, a (Nfreq x Ncoeff x 3)
 	coefficients array,	a frequency list, and writes the data
@@ -282,7 +287,7 @@ def fits_writing(filename, coefficients, freqs):
 	coefficients = [[[5.2,0,0],   [4.8,2,0] ],
 					 [-13.,1,-1], [0.5,3,3]]]
 					 
-	freqs = [980, 990] 
+	freqs = [0.98, 0.99] 
 	'''
 
 	from astropy.io import fits as pyfits
@@ -293,6 +298,7 @@ def fits_writing(filename, coefficients, freqs):
 	hdu.header["ttype3"] = "alpha"
 	hdu.header.comments["ttype2"] = "radial index"
 	hdu.header.comments["ttype3"] = "azimuthal index"
+	hdu.header["radius"] = str(R)
 	
 	hdu_f = pyfits.BinTableHDU.from_columns([pyfits.Column(name="frequencies", format="D", array=freqs)])
 	
@@ -318,7 +324,7 @@ def fits_writing_old(filename, coefficients, freqs):
 	coefficients = [[[5.2,0,0],   [4.8,2,0] ],
 					 [-13.,1,-1], [0.5,3,3]]]
 					 
-	freqs = [980, 990] 
+	freqs = [0.98, 0.99] 
 	'''
 
 	from astropy.io import fits as pyfits
@@ -363,8 +369,8 @@ def fits_writing_old(filename, coefficients, freqs):
 def rect_to_polar(rec_coord, center):
 	'''
 	This function takes rectangular coordinates (x,y) and transforms
-	them into polar coordinates (r,theta).
-	0 <= theta < 2*pi
+	them into polar coordinates (r,phi).
+	0 <= phi < 2*pi
 	'''
 	
 	x = rec_coord[0] - center[0]
@@ -374,22 +380,22 @@ def rect_to_polar(rec_coord, center):
 	
 	if x!=0 and y!=0:
 	
-		theta = np.arctan(y/x)
-		if x<0: theta = theta-np.sign(theta)*(np.pi)
+		phi = np.arctan(y/x)
+		if x<0: phi = phi-np.sign(phi)*(np.pi)
 	
 	else:
 	
 		if y==0:
-			if x<0: theta = np.pi
-			else: theta = 0
+			if x<0: phi = np.pi
+			else: phi = 0
 			
 		else: # x==0
-			if y>0: theta = np.pi/2
-			else: theta = -np.pi/2 
+			if y>0: phi = np.pi/2
+			else: phi = -np.pi/2 
 	
-	if theta<0: theta = 2*np.pi + theta
+	if phi<0: phi = 2*np.pi + phi
 	
-	return [r,theta]
+	return [r,phi]
 
 
 
@@ -417,11 +423,11 @@ def polar_grid(grid_lim, Npoints, center, verbose=False):
 
 
 
-def uv_to_polar(rec_coord, center):
+def uv_to_polar(rec_coord, center=[0,0]):
 	'''
 	This function takes uv coordinates (u,v) and transforms
-	them into polar coordinates (r,theta).
-	0 <= theta < 2*pi
+	them into polar coordinates (r,phi).
+	0 <= phi < 2*pi
 	'''
 	
 	u = rec_coord[0] - center[0]
@@ -431,44 +437,38 @@ def uv_to_polar(rec_coord, center):
 	
 	if u!=0 and v!=0:
 	
-		theta = np.arctan(v/u)
-		if u<0: theta = theta-np.sign(theta)*(np.pi)
+		phi = np.arctan(v/u)
+		if u<0: phi = phi-np.sign(phi)*(np.pi)
 	
 	else:
 	
 		if v==0:
-			if u<0: theta = np.pi
-			else: theta = 0
+			if u<0: phi = np.pi
+			else: phi = 0
 			
 		else: # x==0
-			if v>0: theta = np.pi/2
-			else: theta = -np.pi/2 
+			if v>0: phi = np.pi/2
+			else: phi = -np.pi/2 
 	
-	if theta<0: theta = 2*np.pi + theta
+	if phi<0: phi = 2*np.pi + phi
 	
-	return [r,theta]
+	return [r,phi]
 
 
 
-def polar_uv_grid(grid_lim, Npoints, center, verbose=False):
+def polar_uv_grid(UV, center=[0,0], verbose=False):
 	'''
 	This function takes the limits from a uv-grid and calculates the
 	coordinates of all of the points, and then returns the angle and 
 	radius respective to each point in a one-dimensional structure.
 	'''
 
-	if verbose: print("\nGenerating grid...")
-	
-	U = np.linspace(grid_lim[0],grid_lim[2],Npoints[0])
-	V = np.linspace(grid_lim[1],grid_lim[3],Npoints[1])
-	
-	UU, VV = np.meshgrid(U,V)
+	if verbose: print("\nConverting from uv to theta-phi...")
 	
 	coordinates = []
 	
-	for i in range(len(UU)):
-		for j in range(len(VV[0])):
-			coordinates.append( uv_to_polar([UU[i][j], VV[i][j]], center) )
+	for uv in UV:
+		coordinates.append( uv_to_polar(uv, center) )
 			
 	return np.array(coordinates)
 	
@@ -478,7 +478,7 @@ def circular_mask(data,coordinates,radius,normalisation=False, verbose=False):
 	'''
 	Takes a dataset and its respective coordinates, and masks all of
 	the points outside a given radius.
-	Return: new dataset.
+	Return: masked dataset.
 	'''
 	
 	if verbose: print("\nSelecting circular area around beam maximum...")
@@ -491,7 +491,179 @@ def circular_mask(data,coordinates,radius,normalisation=False, verbose=False):
 				
 	return data, coordinates
 				
+
+
+def approx_zero(x, error=10**-14):
+	'''
+	Verifies if a given value is near zero inside
+	an error range. This is mostly useful to prevent
+	floating point arithmetic errors.
+	'''
+	return abs(x)<error
+	
+	
+
+def polar_rot(coords, phi, theta, verbose=False): 
+	'''
+	Takes a specific point on the surface of the unit sphere
+	described by two angles theta (coords[0]) and phi (coords[1])
+	and performs a rotation which is equivalent to:
+	
+	1) a phi   (rad) rotation about the z-axis;
+	2) a theta (rad) rotation about the new y-axis;
+	3) a -phi  (rad) rotation about the new z-axis.
+	
+	Returns: final coords np.array([theta_new, phi_new])
+	'''
+
+	from scipy.spatial.transform import Rotation as R
+
+	if verbose: print("Performing rotations to centralise polar coordinates...")
+	x = np.sin(coords[0])*np.cos(coords[1])
+	y = np.sin(coords[0])*np.sin(coords[1])
+	z = np.cos(coords[0])
+	
+	vec_0 = np.array([x,y,z])
+	
+	R1 = R.from_rotvec(phi*np.array([0,0,1])).as_matrix() # Rotating about the z-axis
+	y_axis = R1[:,1] # New y-axis
+	R2 = R.from_rotvec(-theta*y_axis).as_matrix() # Rotating about the new y-awis
+	# Rotating phi back
+	z_axis = np.linalg.inv(np.dot(R1,R2))[:,2]
+	R3 = R.from_rotvec(-phi*z_axis).as_matrix()
+	
+	#vec = np.dot(np.dot(R1,R2),vec_0)
+	vec = np.dot(np.dot(np.dot(R1,R2),R3),vec_0)
+	
+	assert approx_zero(vec[0]**2+vec[1]**2+vec[2]**2-1), "Coordinates do not point to unit sphere."
+
+	if approx_zero(vec[0]): # vec[0]==0
+		if approx_zero(vec[1]): # vec[1]==0
+			if   approx_zero(vec[2]-1): return np.array([0,0])     # vec[2]==1
+			elif approx_zero(vec[2]+1): return np.array([np.pi,0]) # vec[2]==-1
+			else: print("Error: coordinates do not point to unit sphere")
+		elif vec[1]<0: phi_new = 3*np.pi/2
+		else:          phi_new = np.pi/2
+	
+	else:
+		if approx_zero(vec[1]):
+			if vec[0]>0: phi_new = 0
+			else:        phi_new = np.pi 	
+		elif vec[1]>0: phi_new = np.arctan(vec[1]/vec[0])%np.pi
+		elif vec[1]<0: phi_new = np.pi + (np.arctan(vec[1]/vec[0]))%np.pi
+			
+	theta_new = np.arccos(vec[2])
+	
+	return np.array([theta_new, phi_new])
+
+
+
+def rotate_coords(coords, center, verbose=False):
+	'''
+	This function applies polar_rot to a whole array of coordinates.
+	
+	Returns: rotated coordinates.
+	'''
+	
+	if verbose: print("\nRotating coordinates to centralize on beam maximum...")
+	
+	p=0
+	N=len(coords)
+	
+	rot_coords = []
+	
+	for i in range(N):
 		
+		coord = coords[i]
+	
+		if verbose:
+			if int(100*i/N)!=int(p):
+				print(int(100*i/N),"%",end="\r")
+			p = 100*i/N
+			
+		rot_coords.append(polar_rot(coord, center[1], center[0]))
+		
+	return np.array(rot_coords)
+
+
+
+def sphere_separation(d1, a1, d2, a2):
+    """
+	great circle distance http://en.wikipedia.org/wiki/Great-circle_distance#Computational_formulas
+
+	:param d1: dec 1
+	:param a1: ra 1
+	:param d2: dec 2
+	:param a2:ra 2
+
+    Taken from HIDE.
+    """
+    
+    sin_d1, cos_d1 = np.sin(d1), np.cos(d1) #sin_cos(d1) #np.sin(d1), np.cos(d1)
+    sin_d2, cos_d2 = np.sin(d2), np.cos(d2) #sin_cos(d2) #np.sin(d2), np.cos(d2)
+    sin_a2a1, cosa2a1 = np.sin(a2-a1), np.cos(a2-a1) #sin_cos(a2-a1) #np.sin(a2-a1), np.cos(a2-a1)
+    return (np.arctan2((np.sqrt(cos_d2**2 * sin_a2a1**2 + (cos_d1 * sin_d2 - sin_d1 * cos_d2 * cosa2a1)**2)), (sin_d1 * sin_d2 + cos_d1 * cos_d2 * cosa2a1)))
+
+
+
+
+def spherical_arccos(a,b,c):
+	'''
+	Spherical law of cosines:
+	https://en.wikipedia.org/wiki/Spherical_trigonometry#Derivation_of_the_cosine_rule
+	'''
+	
+	if b!=0 and c!=0:
+		cosA = (np.cos(a)-np.cos(b)*np.cos(c))/(np.sin(b)*np.sin(c))
+	else: return 0
+	
+	print(a,b,c,cosA)
+		
+	return np.arccos(cosA)
+	
+	
+
+
+def uv_integrate(data, thetas_matrix, Npoints, grid_lim):
+	'''
+	This function integrates a dataset over u and then over v.
+	The data must be given in a matrix format.
+	
+	The jacobian in terms of theta-phi is 
+	sin(theta)*d(theta)*d(phi) = cos(theta)*du*dv
+	'''
+	
+	try: data[data.mask==1] = 0 # taking out masked elements
+	except: pass
+	
+	from scipy.integrate import simps
+
+	jacob = 1/np.cos(thetas_matrix)
+	uv_area = (grid_lim[3]-grid_lim[1])*(grid_lim[2]-grid_lim[0])
+	data = data*jacob
+	data_max = np.max(data)
+	
+	# This method seems to have an intrinsic error
+	#I_u = [simps(data[i,:]**2, np.linspace(grid_lim[0],grid_lim[2],Npoints[0])) for i in range(Npoints[1])]
+	#I_uv =  simps(I_u, np.linspace(grid_lim[1],grid_lim[3],Npoints[1]))
+	
+	
+	# 2D Monte Carlo integration
+	
+	N = 100 # number of tries per pixel
+	total = N*Npoints[0]*Npoints[1]
+	counts = 0
+	samples = data_max*np.random.rand(Npoints[0],Npoints[1],N)
+
+	for i in range(Npoints[0]):
+		for j in range(Npoints[1]):
+			y = data[i][j]
+			counts += np.sum(samples[i,j,:]<=y)
+
+	fraction = counts/total
+	I_uv = data_max * uv_area * fraction
+	
+	return I_uv
 
 			 
 			   
@@ -531,7 +703,7 @@ def zernike_values(coordinates, indices, verbose=False):
 	
 	if verbose: print("\nCalculating zernike polynomials in each point of the grid...")
 	
-	indices = np.array(indices)
+	#indices = np.array(indices)
 	p=0
 
 	Z = []
@@ -540,7 +712,7 @@ def zernike_values(coordinates, indices, verbose=False):
 	for i in range(npix):
 		
 		r = coordinates[i][0]
-		theta = coordinates[i][1]
+		phi = coordinates[i][1]
 		Z.append([])
 
 			
@@ -552,14 +724,14 @@ def zernike_values(coordinates, indices, verbose=False):
 		
 		for index in indices:
 			
-			Z[i].append(zernike_polynomial(r, theta, index[0], index[1]))
+			Z[i].append(zernike_polynomial(r, phi, index[0], index[1]))
 
 		
 	return np.array(Z)
 
 
 
-def zernike_coeff(data, Z, verbose=False):
+def zernike_coeff(data, Z, indices, verbose=False):
 	'''
 	C = inv( Z.T * Z ) * Z.T * data
 	'''
@@ -568,32 +740,24 @@ def zernike_coeff(data, Z, verbose=False):
 	
 	Z = np.array(Z)
 	data = np.array(data)	
-	C = np.dot(np.dot( np.linalg.inv(np.dot(Z.T, Z)), Z.T), data)
+	Coeff = np.dot(np.dot( np.linalg.inv(np.dot(Z.T, Z)), Z.T), data)
 	
-	C_info = []
+	Coeff_info = []
 	
-	beta = 0
-	alpha = 0
+	for i in range(len(Coeff)):
 	
-	for i in range(len(C)):
+		Coeff_info.append([Coeff[i],indices[i][0],indices[i][1]])
 	
-		C_info.append([C[i],beta,alpha])
-		
-		if alpha==beta:
-			beta+=1
-			alpha = -beta
-			
-		else: alpha+=2
-	
-	return np.array(C_info)
+	return np.array(Coeff_info)
 	
 
 
-def beam_reconstruction(C,Npoints,verbose):
+def beam_reconstruction(Coeff,Npoints,verbose=False):
 	'''
-	This function takes Zernike coefficients and reconstructs
-	its correspondent beam on a unit circle inside a 2x2 square
-	with the given number of pixels Npoints=[Nx,Ny].
+	This function takes Zernike coefficients ((ncoeffs,3) matrix)
+	and reconstructs its correspondent beam on a unit circle inside
+	a 2x2 square with the given number of pixels Npoints=[N_x,N_y].
+	
 	Returns a one-dimensional array containing the beam data.
 	'''
 	
@@ -602,15 +766,15 @@ def beam_reconstruction(C,Npoints,verbose):
 	coord_mask = [0 if coordinates[i,0]>1 else 1 for i in range(Npoints[0]*Npoints[1])]
 	coordinates = np.array([coordinates[i] if coord_mask[i]==1 else [np.nan, np.nan] for i in range(len(coordinates))])
 	
-	indices = C[:,1:3]
+	indices = Coeff[:,1:3]
 	Z = np.array(zernike_values(coordinates, indices, verbose=verbose))
-	beam = np.dot(Z,C[:,0])
+	beam = np.dot(Z,Coeff[:,0])
 	
 	return beam
 	
 	
 	
-def hpbeam(C, nside, center, beam_radius):
+def hp_beam(Coeff, nside, center, beam_radius):
 	'''
 	This function receives the coefficients that describe a beam
 	and reconstructs it in a healpix format, centered at center and
@@ -626,9 +790,102 @@ def hpbeam(C, nside, center, beam_radius):
 	
 	center_vec = hp.ang2vec(center)
 	disk_pixels = hp.query_disc(nside, center_vec, radius=beam_radius)
+	disk_angs = hp.pix2ang(disk_pixels)
+	
+	
+	# rotate to get polar
+	
+	# reconstruct with Z
+	
+	# put signal in pixels
+	
 	
 	
 	# TO BE FINISHED
+
+
+
+def radec_beam(Coeff, RA, DEC, R):
+	'''
+	This function receives the coefficients that describe a beam
+	and two meshgrids containing angular coordinates (RA, dec),
+	and	reconstructs the beam for the given directions.
+	RA and DEC must be centered at 0 (as how is done in HIDE).
+	'''
+
+	coordinates = []
+	for i in range(len(RA)):
+		for j in range(len(DEC[0])):
+			# Transforming to polar coordinates (dec, ra) -> (r, phi)
+			r = np.sqrt(DEC[i][j]**2 + RA[i][j]**2)
+			phi = -uv_to_polar([DEC[i][j], RA[i][j]])[1] #-np.arctan(RA[i][j]/DEC[i][j]) if DEC[i][j]!=0 else 0
+			coordinates.append([r,phi])  
+	
+	coordinates = np.array(coordinates)
+	min_dist = min(np.max(RA),np.max(DEC))
+	assert min_dist>=R, "The parameters beam_azimut ({}) or beam_elevation ({}) should be greater than the beam radius ({}).".format(RA[0][-1], DEC[-1][0], R)
+	coordinates[:,0] = coordinates[:,0]/R   # Normalization
+
+
+	# 1) with 0's and 1's
+	#coord_mask = [0 if coordinates[i,0]>1 else 1 for i in range(RA.shape[0]*RA.shape[1])]
+	#coordinates = np.array([coordinates[i] if coord_mask[i]==1 else [0, 0] for i in range(len(coordinates))])
+	
+	# or 2) with np.masked elements
+	coord_mask = np.ones(len(coordinates))
+	coord_mask = np.ma.masked_where(coordinates[:,0]>1, coord_mask)
+	valid_coordinates = coordinates[~coord_mask.mask]
+		
+	indices = Coeff[:,1:3]
+
+	Z = zernike_values(valid_coordinates, indices, verbose=False)
+	reconstructed_beam = np.dot(Z,Coeff[:,0])
+	
+	beam = reconstruct_masked(reconstructed_beam, coord_mask)
+
+	return beam.reshape(RA.shape)
+
+
+
+def reconstruct_masked(data, masked, keep_shape="False"):
+	'''
+	Returns data according to the mask given in "masked".
+	'''
+	
+	if keep_shape: shape_0 = data.shape
+	data.flatten()
+	masked.flatten()
+	
+	masked_data = np.ma.array(np.zeros(masked.shape), mask=masked.mask)
+	k=0
+	for i in range(len(masked_data)):
+		if masked_data[i] is not np.ma.masked:
+			masked_data[i], k = data[k], k+1
+			
+	if not keep_shape: return masked_data.reshape(shape_0)
+	return masked_data
+
+
+
+def gauss_2d_wrapper(radius=-1):
+
+	def gauss_2d(coords, A, mu_x, mu_y, sigma):
+	
+		x,y = coords
+		x_0, y_0 = x-mu_x, y-mu_y
+		
+		r2 = x_0**2 + y_0**2
+		r02 = radius**2
+		
+		if radius==-1: return A*np.exp( -r2 /sigma**2 /2 )
+		else: return A*np.exp(-r2 /sigma**2 /2) * (r2<=r02) #np.piecewise(r2, [r2<=r02, r2>r02], [A*np.exp(-r2 /sigma**2 /2), 0])
+		
+	return gauss_2d
+
+
+
+######
+
 
 
 def dualcut_plot(data, theta_i, delta_theta, Npoints, phi, polarisation="co"):
@@ -645,8 +902,6 @@ def dualcut_plot(data, theta_i, delta_theta, Npoints, phi, polarisation="co"):
 	thetas = np.linspace(theta_i,theta_f,Npoints)
 	# linspace introduces a tiny little error in delta_theta
 
-	import matplotlib.pyplot as plt
-		
 	plt.figure(0)
 	plt.plot(thetas, amplitude, marker="o")
 	plt.title(r"$\phi$ = {}{}".format(phi,chr(176))) # chr(176) = degree sign
@@ -656,303 +911,84 @@ def dualcut_plot(data, theta_i, delta_theta, Npoints, phi, polarisation="co"):
 
 
 
+def beam_plot(filename, grid="theta-phi", pol="co", title=None, verbose=False, fig_path=None, fig_filename=None,f=0):
+	'''
+	Takes .grd file and plots the 'co' polarisation data in it.
+	If there are multiple freqs in one file, the parameter f will
+	determine which frequency should be plotted.
+	
+	If figpath_name=None, it just shows the figure instead of saving it.
+	'''
+
+	cols, grid_lims, grid_centers, Nps,     freqs = grasp_spher_grd_file(filename, shift_center=True, verbose=verbose)
+	cols, grid_lim,  grid_center,  Npoints, freq  = cols[f], grid_lims[f], grid_centers[f], Nps[f], freqs[f]
+	
+	if pol=="co":   data = np.sqrt(cols[:,0]**2 + cols[:,1]**2).reshape(Npoints)
+	elif pol=="cx": data = np.sqrt(cols[:,2]**2 + cols[:,3]**2).reshape(Npoints)
+	
+	if   grid=="uv": coordinates = polar_grid(grid_lim, Npoints, grid_center, verbose)
+	elif grid=="theta-phi": coordinates = polar_uv_grid(grid_lim, Npoints, grid_center, verbose)
+	else: print("grid parameter must be either 'uv' or 'theta-phi'.")
+
+	r = coordinates[:,0]
+	phi = coordinates[:,1]
+	XX = (r*np.cos(phi)).reshape(Npoints)
+	YY = (r*np.sin(phi)).reshape(Npoints)
+	
+	if title==None: title="{} GHz - {} points".format(freq,Npoints)
+	
+	plt.figure()
+	plt.pcolormesh(XX, YY, 20*np.log(data), shading="auto")
+	plt.title(title)
+	plt.colorbar()
+	if fig_filename==None: fig_filename="freq{}_npts{}.png".format(int(1000*freq),Npoints)
+	if fig_path!=None: plt.savefig(fig_path+fig_filename)
+	else: plt.show()
+	plt.close()
+	
+	return True
+
+
+
 #.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'#
 #.'.Not-so-general Functions'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'#
 #.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'.'#
 
 
 
-def beam_zernike_coefficients(cols, grid_lim, grid_center, Npoints, freq, radius, beta_max, verbose=False, show_plots=False):
-	'''
-	This functions takes a GRASP file and makes a fit using
-	Zernike Polynomials within a given radius around the beam 
-	maximum. It does so using only those coefficient whose
-	absolute value is greeater than msc, considering a max
-	value for beta, which is the degree of the polynomial.
-	
-	Return: estimated coefficients.
-	'''
-	
-	#===
-	# Grid Operations
-	#===
-		
-	coordinates = polar_uv_grid(grid_lim, Npoints,grid_center,verbose)
-	
-	data = np.sqrt(cols[:,0]**2 + cols[:,1]**2)
-	data, coordinates = circular_mask(data, coordinates, radius, normalisation=True, verbose=verbose)
-	
-	# Turned off
-	if show_plots and False:
-	
-		print("\nPlotting grid...")
-		
-		from matplotlib import pyplot as plt
-	
-		fig = plt.figure(0)
-		
-		X = np.linspace(grid_lim[0],grid_lim[2],Npoints[0],endpoint=True)
-		Y = np.linspace(grid_lim[1],grid_lim[3],Npoints[1],endpoint=True)
-		XX, YY = np.meshgrid(X,Y)
-		ax1 = fig.add_subplot(211)
-		c1 = ax1.scatter(XX,YY)		
-		
-		ax2 = fig.add_subplot(212, projection="polar")
-		c2 = ax2.scatter(coordinates[:,1],coordinates[:,0])
-		
-		plt.show()	
-	
-	valid_data = data[~data.mask]
-	valid_coordinates = coordinates[~data.mask]
-	
-	
-	#===
-	# Zernike Coefficients
-	#===
-
-	coeff_number = (beta_max+1)*(beta_max+2)/2
-	# This is flexible so that you can input the desired indices list
-	indices = zernike_indices(coeff_number)
-
-	Z = np.array(zernike_values(valid_coordinates, indices, verbose))
-	C = zernike_coeff(valid_data,Z,verbose)
-	
-	if verbose:
-	
-		print("Estimated coefficients ({}):".format(len(C)))
-		print(C)
-	
-	reconstructed_beam = np.dot(Z,C[:,0])
-	
-	masked_beam = np.ma.array(np.zeros(data.shape),mask=data.mask)
-	k=0
-	for i in range(len(masked_beam)):
-		if masked_beam[i] is not np.ma.masked:
-			masked_beam[i], k = reconstructed_beam[k], k+1
-
-
-	#===
-	# Error Analysis
-	#===
-
-	residuals = data - masked_beam
-
-	NRME = np.sqrt(np.sum(residuals**2)/len(valid_coordinates))
-	if verbose: print("\nNormalised Root-Mean-Squared Error (NRME):",NRME)
-
-	# Reconstructed Power Fraction
-	# According to GRASP, the power in far-field cases is P = (k|E|)^2
-	
-	data_matrix = data.reshape((Npoints[0],Npoints[1]))
-	beam_matrix = masked_beam.reshape((Npoints[0],Npoints[1]))
-	residuals_matrix = residuals.reshape((Npoints[0],Npoints[1]))
-	
-	k = 2*np.pi*10**6*float(freq)/c    # wavenumber
-	
-	from scipy.integrate import simps
-	
-	# Here, we integrate over x and then over y
-	
-	P1_x = [simps(data_matrix[i,:]**2, np.linspace(grid_lim[0],grid_lim[2],Npoints[0])) for i in range(Npoints[1])]
-	P_original =  k**2*simps(P1_x, np.linspace(grid_lim[1],grid_lim[3],Npoints[1]))
-	
-	P2_x = [simps(beam_matrix[i,:]**2, np.linspace(grid_lim[0],grid_lim[2],Npoints[0])) for i in range(Npoints[1])]
-	P_reconstructed =  k**2*simps(P2_x, np.linspace(grid_lim[1],grid_lim[3],Npoints[1]))
-	
-	P0_x = [simps(residuals_matrix[i,:]**2, np.linspace(grid_lim[0],grid_lim[2],Npoints[0])) for i in range(Npoints[1])]
-	P_res =  k**2*simps(P0_x, np.linspace(grid_lim[1],grid_lim[3],Npoints[1]))
-	
-	rec_power = P_reconstructed/P_original
-	res_power = P_res/P_original
-	
-	if verbose: print("\nRelative reconstructed power (reconstructed/original): {}%".format(100*rec_power))
-	if verbose: print("Relative residual power (residuals/original): {}%".format(100*res_power))
-		
-	
-	#===
-	# Beam Plotting
-	#===
-	
-	if show_plots:
-	
-		print("\nPlotting original and reconstructed beams...")
-	
-		from matplotlib import pyplot as plt
-		fig, axs = plt.subplots(ncols=3, sharex=True, sharey=True, figsize=(16,4))
-		#plt.rcParams.update({"text.usetex": True, "font.family": "sans-serif", "font.sans-serif": ["Helvetica"]})
-				
-		
-		print("\nConverting polar to rectangular coordinates...")
-		
-		r = coordinates[:,0]
-		theta = coordinates[:,1]
-		
-		XX = (r*np.cos(theta)).reshape(Npoints)
-		YY = (r*np.sin(theta)).reshape(Npoints)
-		
-		
-		vmin = np.min(data_matrix)
-		vmax = np.max(data_matrix)
-		
-		# Original Beam
-		
-		axs[0].set_title("Original Beam")
-		c1 = axs[0].pcolormesh(XX,YY,20*np.log10(abs(data_matrix)), shading="auto")
-		cbar = fig.colorbar(c1, ax=axs[0])
-		cbar.set_label("Amplitude (dB)")
-		
-		
-		# Reconstructed Beam
-		
-		axs[1].set_title(r"Reconstructed Beam with $\beta_{max}$=" + "{}".format(beta_max))
-		c2 = axs[1].pcolormesh(XX,YY,20*np.log10(abs(beam_matrix)), vmin=20*np.log10(vmin), vmax=20*np.log10(vmax), shading="auto")
-		cbar = fig.colorbar(c2, ax=axs[1])
-		cbar.set_label("Amplitude (dB)")
-		
-		
-		# Residuals
-
-		axs[2].set_title("Residuals")
-		c3 = axs[2].pcolormesh(XX,YY,20*np.log10(abs(residuals_matrix)), vmin=20*np.log10(vmin), vmax=20*np.log10(vmax), shading="auto")
-		cbar = fig.colorbar(c3,ax=axs[2])
-		cbar.set_label("Amplitude (dB)")
-		
-		fig.suptitle("{} GHz Beam Resconstruction".format(freq))
-		plt.show()
-
-	return C, NRME, rec_power, res_power
-
-
-
-def multifreq_zernike(filename, radius, beta_max, msc, verbose=False, show_plots=False):
-	'''
-	This function takes a .grd file (which may contain datasets from
-	one or more frequencies), a radius, and returns Cs, freqs, NRMEs,
-	rec_powers and res_powers.
-	'''
-
-	cols, grid_lims, grid_centers, Nps, freqs = grasp_spher_grd_file(filename, shift_center=True, verbose=False)
-	
-	# Sorting in frequency-increasing order
-	indices = np.argsort(freqs)
-	freqs, cols, grid_lims, grid_centers, Nps = freqs[indices], cols[indices], grid_lims[indices], grid_centers[indices], Nps[indices]
-	
-	
-	Cs = []
-	NRMEs = []
-	rec_powers = []
-	res_powers = []
-
-	if verbose: print("\nFrequencies encountered in current file (GHz):\n {}".format(freqs))
-
-	for f in range(len(freqs)):
-	
-		C, NRME, rec_power, res_power = beam_zernike_coefficients(cols[f], grid_lims[f], grid_centers[f], Nps[f], freqs[f], radius, beta_max, verbose, show_plots)
-		
-		Cs.append(C)
-		NRMEs.append(NRME)
-		rec_powers.append(rec_power)
-		res_powers.append(res_power)
-		
-	return np.array(Cs), freqs, np.array(NRMEs), np.array(rec_powers), np.array(res_powers)
-	
-	
-	
-def multifile_zernike(file_list, radius, beta_max, msc, verbose=False, show_plots=False, final_txt=None, final_fits=None):
-	'''
-	Receives a list of .grd files and performs the zernike fit for
-	each of them.
-	
-	final_txt: if None, does nothing; if str, writes a txt with the
-	final results, saving it with the given name.
-	final_fits: if None, does nothing; if str, writes a fits file
-	with the calculated coefficients and frequencies.
-	'''
-
-	file_name = file_list[0]
-	if verbose:
-		print("\n\n========================================")
-		print("****************************************")
-		print("<> Extracting data from file ({}/{}):\n{}\n".format(1,len(file_list),file_name))
-	
-	Cs, freqs, NRMEs, rec_powers, res_powers = multifreq_zernike(file_name, radius, beta_max, msc, verbose, show_plots)
-
-	for i in range(1,len(file_list)):
-	
-		file_name = file_list[i]
-		
-		if verbose:
-			print("\n\n==============================================")
-			print("**********************************************")
-			print("<> Extracting data from file({}/{}):\n{}\n".format(i+1,len(file_list),file_name))
-	
-		Cs_i, freqs_i, NRMEs_i, rec_powers_i, res_powers_i = multifreq_zernike(file_name, radius, beta_max, msc, verbose, show_plots)
-		
-		Cs         = np.concatenate((Cs,Cs_i))
-		freqs      = np.concatenate((freqs,freqs_i))
-		NRMEs      = np.concatenate((NRMEs,NRMEs_i))
-		rec_powers = np.concatenate((rec_powers,rec_powers_i))
-		res_powers = np.concatenate((res_powers,res_powers_i))
-
-	
-	if verbose:
-		print("\n\n FINAL RESULTS:")
-		print(Cs)
-		print("Radius:",radius)
-		print("Frequencies (GHz):\n",freqs)
-		print("NRME:\n",NRMEs)
-		print("Reconstructed Power Fractions:\n",100*rec_powers)
-		print("Residual Power Fraction:\n",100*res_powers)
-		
-	if final_txt!=None:
-		f_txt = open(final_txt,"w")
-		f_txt.write("Radius: {}\n".format(radius))
-		f_txt.write("Frequencies (GHz):\n{}\n".format(freqs))
-		f_txt.write("NRME:\n{}\n".format(NRMEs))
-		f_txt.write("Reconstructed Power Fractions:\n{}\n".format(100*rec_powers))
-		f_txt.write("Residual Power Fraction:\n{}\n".format(100*res_powers))
-		f_txt.write("Coefficients:\n{}".format(Cs))
-		
-	if final_fits!=None:
-		zk.fits_writing(final_fits, Cs, freqs)
-
-
-	return Cs, freqs, NRMEs, rec_powers, res_powers
-
-
-
-def spectral_plot(Cs, freqs, msc=0, verbose=False):
+def spectral_plot(Coeffs, freqs, msc=0, verbose=False, fig_path=None):
 	'''
 	Takes a multifrequency list of Zernike coefficients and
 	plots those which are above MSC value (Minimum Signifficant
 	Coefficient) *at least* in one frequency channel.
 	'''
 	
-	C = []
-	for i in range(len(Cs)):
-		C.append([Cs[i,k] for k in range(len(Cs[i])) if (True in np.array(abs(Cs[:,k,0])>=msc))])
-	C = np.array(C)
+	Coeff = []
+	for i in range(len(Coeffs)):
+		Coeff.append([Coeffs[i,k] for k in range(len(Coeffs[i])) if (True in np.array(abs(Coeffs[:,k,0])>=msc))])
+	Coeff = np.array(Coeff)
 	
-	if verbose: print(C)
+	if verbose:
+		print("\nCoefficients greater than MSC={} ({}/{})):\n".format(msc,len(Coeff[0]),len(Coeffs[0])),Coeff[0,:,1:3])
 
-
-	import matplotlib.pyplot as plt
 	
-	for i in range(C.shape[1]):
-		plt.plot(freqs, abs(C[:,i,0]), label=str(C[0,i,1:3]))
+	plt.figure(0,figsize=(13,7.2))
+	for i in range(Coeff.shape[1]):
+		plt.plot(freqs, abs(Coeff[:,i,0]), label=str(Coeff[0,i,1:3]))
 		plt.legend(bbox_to_anchor=(1,1) ,loc="upper left")
 		
-	plt.title("Spectral Representation of Zernike Coefficients")
+	plt.title("Spectral Representation of Zernike Coefficients - MSC={} ({}/{})".format(msc,len(Coeff[0]),len(Coeffs[0])))
 	plt.xlabel("Frequency (GHz)")
 	plt.ylabel(r"|C($\nu$)|")
 		
-	plt.show()
+	if fig_path==None: plt.show()
+	else: plt.savefig(fig_path + "spectral_coefficients_{:.2f}_to_{:.2f}.png".format(freqs[0],freqs[-1]))
 	
-	return True
+	return Coeff
 	
 	
 	
-def singlecut_interp(file, theta_max, phi, N_interp,show_plots=False, verbose=False):
+def singlecut_interp(file_path, theta_max, phi, N_interp, title=None, show_plots=False, verbose=False):
 	'''
 	This function takes a .grd file containing 2D data from a beam and
 	performs an interpolation at the given phi for a N_interp number of
@@ -975,9 +1011,7 @@ def singlecut_interp(file, theta_max, phi, N_interp,show_plots=False, verbose=Fa
 	Npoints = Nps[0]
 	
 	if verbose: print("Grid center = {}, Npoints = {}".format(grid_center, Npoints))
-		
-		
-	import matplotlib.pyplot as plt
+
 		
 	coordinates = polar_uv_grid(grid_lim, Npoints,grid_center,verbose=verbose)
 	extra_points = np.array([ [theta,-np.pi+phi] for theta in np.linspace(0, theta_max, N_interp)][::-1] +\
@@ -991,6 +1025,7 @@ def singlecut_interp(file, theta_max, phi, N_interp,show_plots=False, verbose=Fa
 	if show_plots:
 		plt.figure(0)	
 		plt.scatter(np.degrees(X),np.degrees(Y))
+		plt.title("Interpolated Region")
 		plt.scatter(np.degrees(X_new),np.degrees(Y_new),marker="x",color="red")
 			
 	data = np.sqrt(cols[0,:,0]**2 + cols[0,:,1]**2)
@@ -1015,6 +1050,8 @@ def singlecut_interp(file, theta_max, phi, N_interp,show_plots=False, verbose=Fa
 		theta = np.array([extra_points[i][0] if extra_points[i][1]>0 else -extra_points[i][0] for i in range(len(extra_points))])
 		plt.figure(2)
 		plt.plot(np.degrees(theta),abs(d),marker="o")
+		if title==None: title = r"Dual cut Interpolation $phi$={}{}".format(np.degrees(phi),chr(176))
+		plt.title(title)
 		plt.show()	
 	
 	return d
