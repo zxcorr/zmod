@@ -108,7 +108,7 @@ class Beam_Data(object):
 	
 	def generate_grid(self, fast=False, verbose=False):
 	
-		grid_lim   = self.grid_lims
+		grid_lim    = self.grid_lims
 		grid_center = self.grid_center
 		Npoints     = self.Npoints
 	
