@@ -1,4 +1,4 @@
-# zmod
+# Zernike Module (zmod)
 This program contains functions that are suited for performing
 a fit of the beam pattern data produced by GRASP, more specifically, 
 it takes data from a .grd file and finds the Zernike coefficients
