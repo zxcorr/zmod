@@ -95,12 +95,9 @@ class Beam_Zernike_Fit(object):
 
 		# Reconstructed Power Fraction
 		thetas = thetaphi_coordinates[:,0].reshape(Npoints)
-		P_original = zk.grid_ops.uv_integrate(data_matrix**2, thetas,
-												   Npoints, grid_lim)
-		P_res = zk.grid_ops.uv_integrate(residuals_matrix**2, thetas,
-												   Npoints, grid_lim)
-		#P_reconstructed = zk.grid_ops.uv_integrate(beam_matrix**2, thetas,
-		#										   Npoints, grid_lim)
+		P_original = zk.grid_ops.uv_integrate(data_matrix**2, thetas, grid_lim)
+		P_res = zk.grid_ops.uv_integrate(residuals_matrix**2, thetas, grid_lim)
+		#P_reconstructed = zk.grid_ops.uv_integrate(beam_matrix**2, thetas, grid_lim)
 		if verbose:
 			print("\nOriginal Power: {}, Resisdual Power: {}".format(P_original, P_res))
 		res_power = P_res/P_original
@@ -351,12 +348,9 @@ class Beam_Gaussian_Fit(object):
 		z_res = z_res.reshape(Npoints)
 				
 		thetas = self.beam_data.thetaphi_grid[:,0].reshape(Npoints)
-		P_data = zk.grid_ops.uv_integrate(Data**2, thetas, self.beam_data.Npoints,
-														   self.beam_data.grid_lims)
-		P_fit  = zk.grid_ops.uv_integrate(z_fit**2, thetas, self.beam_data.Npoints,
-															self.beam_data.grid_lims)
-		P_res  = zk.grid_ops.uv_integrate(z_res**2, thetas, self.beam_data.Npoints,
-															self.beam_data.grid_lims)
+		P_data = zk.grid_ops.uv_integrate(Data**2, thetas, self.beam_data.grid_lims)
+		P_fit  = zk.grid_ops.uv_integrate(z_fit**2, thetas, self.beam_data.grid_lims)
+		P_res  = zk.grid_ops.uv_integrate(z_res**2, thetas, self.beam_data.grid_lims)
 		
 		self.res_power = P_res/P_data
 		self.rec_power = 1-self.res_power
