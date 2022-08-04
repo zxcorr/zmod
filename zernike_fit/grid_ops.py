@@ -74,16 +74,18 @@ def uv2thetaphi(uv):
 	'''
 	u,v = uv[0],uv[1]
 	theta = np.arcsin(np.sqrt(u**2+v**2))
-	phi = np.arctan2(v,u)
+	phi = np.arctan2(v,u)%(2*np.pi)
 	return [theta,phi]
 
 
 
 def uv2thetaphigrid(UV, verbose=False):
 	'''
-	This function takes the limits from a uv-grid and calculates the
-	coordinates of all of the points, and then returns the angle and 
-	radius respective to each point in a one-dimensional structure.
+	This function takes a uv-grid and calculates the equivalent angles in spherical
+	coordinates (theta-phi).
+	
+	UV: [[u1,v1], ..., [uN,vN]] - (N,2) array
+	Returns: (N,2) array
 	'''
 
 	if verbose: print("\nConverting from uv to theta-phi...")
@@ -92,6 +94,28 @@ def uv2thetaphigrid(UV, verbose=False):
 		coordinates.append(uv2thetaphi(uv))
 			
 	return np.array(coordinates)
+	
+	
+
+def radec2thetaphi(radec):
+	'''
+	This function takes a radec array and calculates the equivalent thetaphi coordinates.
+	
+	radec: [[ra1,dec1], ..., [raN,decN]] - (N,2) array
+	Returns: (N,2) array
+	'''
+	
+	ras = radec.T[0]
+	decs = radec.T[1]
+	
+	thetas = np.sqrt(ras**2+decs**2)
+	phis = np.arctan2(ras,decs)
+	
+	return np.vstack((thetas,phis)).T
+	
+	
+	
+def thetaphi2radec(thetaphi): pass
 	
 
 
@@ -172,7 +196,7 @@ def sphere_rot(coords, phi, theta, verbose=False):
 
 def rotate_coords(coords, center, verbose=False):
 	'''
-	This function applies sphere_rot to a whole array of coordinates.
+	This function applies sphere_rot to a whole array of theta-phi coordinates.
 	
 	Returns: rotated coordinates.
 	'''
@@ -194,7 +218,7 @@ def rotate_coords(coords, center, verbose=False):
 	
 
 
-def uv_integrate(data, thetas_matrix, Npoints, grid_lim):
+def uv_integrate(data, thetas_matrix, grid_lim):
 	'''
 	This function integrates a dataset over u and then over v.
 	The data must be given in a matrix format.
@@ -202,6 +226,8 @@ def uv_integrate(data, thetas_matrix, Npoints, grid_lim):
 	The jacobian in terms of theta-phi is 
 	sin(theta)*d(theta)*d(phi) = cos(theta)*du*dv
 	'''
+	
+	Npoints = data.shape
 	
 	try: data[data.mask==1] = 0 # removing masked elements
 	except: pass
@@ -211,7 +237,8 @@ def uv_integrate(data, thetas_matrix, Npoints, grid_lim):
 	data = data*jacob
 	data_max = np.max(data)
 	
-	# This method seems to have an intrinsic error
+	# Rectangular Integration over uv
+	# This method seems to have an intrinsic error.
 	#I_u = [simps(data[i,:]**2, np.linspace(grid_lim[0],grid_lim[2],Npoints[0])) for i in range(Npoints[1])]
 	#I_uv =  simps(I_u, np.linspace(grid_lim[1],grid_lim[3],Npoints[1]))
 	
