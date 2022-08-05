@@ -1,5 +1,0 @@
-datetime
-numpy
-scipy
-matplotlib
-astropy
