@@ -172,37 +172,37 @@ class Beam_Zernike_Fit(object):
 			plt.savefig(fig_path)
 			
 			
-		def fits_record(self, beam_data, record_file, verbose=False):
+	def fits_record(self, beam_data, record_file, verbose=False):
 		
-			if verbose: print("Writing .json file...")
-			json_data = {}
-			json_data["input_file"] = "File path not given."
-			json_data["Npoints"] = beam_data.Npoints.tolist()
-			json_data["grid_lims"] = beam_data.grid_lims.tolist()
-			json_data["maximum_pos"] = beam_data.grid_center.tolist()
-			json_data["radius"] = self.radius
-			json_data["frequencies"] = beam_data.frequency.tolist()
-			json_data["NRMS"] = self.NRMS.tolist()
-			json_data["rec_powers"] = self.rec_power.tolist()
-			json_data["res_powers"] = self.res_power.tolist()
-			with open(record_file+".json","w+") as f_json:
-				json.dump(json_data,f_json)
-				
-			hdu = pyfits.PrimaryHDU(self.coeffs)
-			hdu.header["ttype1"] = "coefficients"
-			hdu.header["ttype2"] = "beta"
-			hdu.header["ttype3"] = "alpha"
-			hdu.header.comments["ttype2"] = "radial index"
-			hdu.header.comments["ttype3"] = "azimuthal index"
-			hdu.header["radius"] = str(self.radius)
-			hdu.header.comments["radius"] = "angular radius (rad)"
-			hdu.header["rec"] = str(self.rec_powers)
-			hdu.header["date"] = str(dt.date.today())
-			hdu_f = pyfits.BinTableHDU.from_columns([pyfits.Column(name="frequencies",
-													 format="D",
-													 array=np.array(beam_data.frequency))])
-			hdul = pyfits.HDUList([hdu, hdu_f])
-			hdul.writeto(record_file+".fits",output_verify="warn")
+		if verbose: print("Writing .json file...")
+		json_data = {}
+		json_data["input_file"] = "File path not given."
+		json_data["Npoints"] = beam_data.Npoints.tolist()
+		json_data["grid_lims"] = beam_data.grid_lims.tolist()
+		json_data["maximum_pos"] = beam_data.grid_center.tolist()
+		json_data["radius"] = self.radius
+		json_data["frequencies"] = [beam_data.frequency]
+		json_data["NRMS"] = [self.NRMS]
+		json_data["rec_powers"] = [self.rec_power]
+		json_data["res_powers"] = [self.res_power]
+		with open(record_file+".json","w+") as f_json:
+			json.dump(json_data,f_json)
+			
+		hdu = pyfits.PrimaryHDU(self.coeffs)
+		hdu.header["ttype1"] = "coefficients"
+		hdu.header["ttype2"] = "beta"
+		hdu.header["ttype3"] = "alpha"
+		hdu.header.comments["ttype2"] = "radial index"
+		hdu.header.comments["ttype3"] = "azimuthal index"
+		hdu.header["radius"] = str(self.radius)
+		hdu.header.comments["radius"] = "angular radius (rad)"
+		hdu.header["rec"] = str(self.rec_power)
+		hdu.header["date"] = str(dt.date.today())
+		hdu_f = pyfits.BinTableHDU.from_columns([pyfits.Column(name="frequencies",
+												 format="D",
+												 array=np.array([beam_data.frequency]))])
+		hdul = pyfits.HDUList([hdu, hdu_f])
+		hdul.writeto(record_file+".fits",output_verify="warn")
 			
 			
 			
