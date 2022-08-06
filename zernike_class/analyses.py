@@ -16,7 +16,7 @@ plt.rcParams.update({"font.family": "serif", "font.serif": "Times New Roman"})
 class Beam_Zernike_Fit(object):
 
 	def __init__(self, beam_data, radius, beta_max, verbose=False, pol="co",
-				 indices=None, show_plot=False, fig_path=None):
+				 indices=None, show_plot=False, fig_path=None, record_file=None):
 	
 		assert isinstance(beam_data, bclass.Beam_Data)
 		assert radius>0
@@ -47,6 +47,9 @@ class Beam_Zernike_Fit(object):
 		
 		if show_plot or not isinstance(fig_path, type(None)):
 			self.plot_results(beam_data, fig_path, verbose)
+			
+		if not isinstance(record_file, type(None)):
+			self.fits_record(beam_data, record_file, verbose)
 		
 		
 		
@@ -167,6 +170,39 @@ class Beam_Zernike_Fit(object):
 		else:
 			if verbose: print("\nSaving figure as:\n{}".format(fig_path))
 			plt.savefig(fig_path)
+			
+			
+		def fits_record(self, beam_data, record_file, verbose=False):
+		
+			if verbose: print("Writing .json file...")
+			json_data = {}
+			json_data["input_file"] = "File path not given."
+			json_data["Npoints"] = beam_data.Npoints.tolist()
+			json_data["grid_lims"] = beam_data.grid_lims.tolist()
+			json_data["maximum_pos"] = beam_data.grid_center.tolist()
+			json_data["radius"] = self.radius
+			json_data["frequencies"] = beam_data.frequency.tolist()
+			json_data["NRMS"] = self.NRMS.tolist()
+			json_data["rec_powers"] = self.rec_power.tolist()
+			json_data["res_powers"] = self.res_power.tolist()
+			with open(record_file+".json","w+") as f_json:
+				json.dump(json_data,f_json)
+				
+			hdu = pyfits.PrimaryHDU(self.coeffs)
+			hdu.header["ttype1"] = "coefficients"
+			hdu.header["ttype2"] = "beta"
+			hdu.header["ttype3"] = "alpha"
+			hdu.header.comments["ttype2"] = "radial index"
+			hdu.header.comments["ttype3"] = "azimuthal index"
+			hdu.header["radius"] = str(self.radius)
+			hdu.header.comments["radius"] = "angular radius (rad)"
+			hdu.header["rec"] = str(self.rec_powers)
+			hdu.header["date"] = str(dt.date.today())
+			hdu_f = pyfits.BinTableHDU.from_columns([pyfits.Column(name="frequencies",
+													 format="D",
+													 array=np.array(beam_data.frequency))])
+			hdul = pyfits.HDUList([hdu, hdu_f])
+			hdul.writeto(record_file+".fits",output_verify="warn")
 			
 			
 			
