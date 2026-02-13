@@ -14,6 +14,7 @@ Author: João Alberto
 
 
 import numpy as np
+from tqdm import tqdm
 import healpy as hp
 import matplotlib.pyplot as plt
 plt.rcParams.update({"font.family": "serif", "font.serif": "Times New Roman"})
@@ -34,7 +35,6 @@ def zernike_indices(ncoeff):
 	return np.array(indices)
 
 
-
 def zernike_values(coordinates, indices, verbose=False):
 	'''
 	This function takes a one-dimensional dataset containing polar 
@@ -46,25 +46,21 @@ def zernike_values(coordinates, indices, verbose=False):
 	
 	ncoeff recommended: n(n+1)/2, in which n = beta_max-1
 	'''
-	
-	if verbose: print("\nCalculating zernike polynomials in each point of the grid...")
-
-	p=0
+	if verbose:
+		print("\nCalculating Zernike polynomials in each point of the grid...")
+		# Prepare progress bar with tqdm
+		iterator = tqdm(coordinates, desc="Progress", disable=not verbose)
+	else:
+		iterator = coordinates
 	Z = []
-	npix = len(coordinates)
-	for i in range(npix):
-		r = coordinates[i][0]
-		phi = coordinates[i][1]
-		Z.append([])
-		if verbose:
-			if int(100*i/npix)!=int(p):
-				print(int(100*i/npix),"%",end="\r")
-			p = 100*i/npix
-		for index in indices:
-			Z[i].append(zernike_pols.zernike_polynomial(r, phi, index[0], index[1]))
-		
+	
+	for coord in iterator:
+		r = coord[0]
+		phi = coord[1]
+		Z_row = [zernike_pols.zernike_polynomial(r, phi, index[0], index[1]) for index in indices]
+		Z.append(Z_row)
+	
 	return np.array(Z)
-
 
 
 def zernike_coeff(data, Z, indices, verbose=False):

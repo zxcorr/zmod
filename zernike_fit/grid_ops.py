@@ -126,12 +126,14 @@ def circular_mask(data,coordinates,radius,normalisation=False, verbose=False):
 	Return: masked dataset.
 	'''
 	
-	if verbose: print("\nSelecting circular area around beam maximum...")
+	if verbose: 
+		print("\nSelecting circular area around beam maximum...")
 	# Making new arrays with only the data inside min_radius
-	data = np.ma.masked_where(coordinates[:,0]>radius, data)
-	if normalisation: coordinates[:,0] = coordinates[:,0]/radius
+	data_masked = np.ma.masked_where(coordinates[:,0]>radius, data)
+	if normalisation: 
+		coordinates[:,0] = coordinates[:,0]/radius
 	
-	return data, coordinates
+	return data_masked, coordinates
 				
 
 
@@ -176,15 +178,15 @@ def sphere_rot(coords, phi, theta, verbose=False):
 
 	if approx_zero(vec[0]): # vec[0]==0
 		if approx_zero(vec[1]): # vec[1]==0
-			if   approx_zero(vec[2]-1): return np.array([0,0])     # vec[2]==1
+			if   approx_zero(vec[2]-1): return np.array([0,0])	 # vec[2]==1
 			elif approx_zero(vec[2]+1): return np.array([np.pi,0]) # vec[2]==-1
 			else: print("Error: coordinates do not point to unit sphere")
 		elif vec[1]<0: phi_new = 3*np.pi/2
-		else:          phi_new = np.pi/2
+		else:		  phi_new = np.pi/2
 	else:
 		if approx_zero(vec[1]):
 			if vec[0]>0: phi_new = 0
-			else:        phi_new = np.pi 	
+			else:		phi_new = np.pi 	
 		elif vec[1]>0: phi_new = np.arctan(vec[1]/vec[0])%np.pi
 		elif vec[1]<0: phi_new = np.pi + (np.arctan(vec[1]/vec[0]))%np.pi
 			
@@ -193,8 +195,36 @@ def sphere_rot(coords, phi, theta, verbose=False):
 	return np.array([theta_new, phi_new])
 
 
+def sphere_rot_vec(coords, phi, theta, verbose=False):
+	"""
+	Vectorized: Applies spherical rotation to multiple coordinates at once.
+	"""
+	if verbose:
+		print("Performing rotations to centralize spherical coordinates...")
+	
+	# Convertendo coordenadas esféricas para Cartesianas
+	x = np.sin(coords[:, 0]) * np.cos(coords[:, 1])
+	y = np.sin(coords[:, 0]) * np.sin(coords[:, 1])
+	z = np.cos(coords[:, 0])
+	vec_0 = np.stack((x, y, z), axis=-1)
+	
+	# Matrizes de rotação compostas
+	R_phi = R.from_euler('z', phi).as_matrix()
+	R_theta = R.from_euler('y', -theta).as_matrix()
+	R_phi_neg = R.from_euler('z', -phi).as_matrix()
+	R_total = R_phi @ R_theta @ R_phi_neg
+	
+	# Aplicar a matriz de rotação em massa
+	vec_rot = vec_0 @ R_total.T  # Rotação de vetores (multiplicação matriz-vetor)
+	
+	# Converter de volta para coordenadas esféricas
+	theta_new = np.arccos(vec_rot[:, 2])
+	phi_new = np.arctan2(vec_rot[:, 1], vec_rot[:, 0]) % (2 * np.pi)
 
-def rotate_coords(coords, center, verbose=False):
+	return np.stack((theta_new, phi_new), axis=-1)
+
+
+def rotate_coords(coords, center, verbose=False, optimize=False):
 	'''
 	This function applies sphere_rot to a whole array of theta-phi coordinates.
 	
@@ -202,10 +232,13 @@ def rotate_coords(coords, center, verbose=False):
 	'''
 	
 	if verbose: print("\nRotating coordinates to centralize on beam maximum...")
+
+	if optimize:
+		return sphere_rot_vec(coords, center[1], center[0], verbose=verbose)
+
 	p=0
 	N=len(coords)
 	rot_coords = []
-	
 	for i in range(N):
 		coord = coords[i]
 		if verbose:
@@ -217,8 +250,52 @@ def rotate_coords(coords, center, verbose=False):
 	return np.array(rot_coords)
 	
 
+def uv_integrate_optimized(data, thetas_matrix, grid_lim, eps=1e-6):
+	'''
+	Integrates a dataset over u and v using the adaptive quadrature method.
+	'''
+	import numpy as np
+	from scipy.integrate import quad
+	# Ensure masked elements are set to zero
+	try:
+		data[data.mask] = 0
+	except AttributeError:
+		pass
 
-def uv_integrate(data, thetas_matrix, grid_lim):
+	# Compute Jacobian
+	jacob = 1 / np.cos(thetas_matrix)
+	data *= jacob
+
+	# Define grid spacings
+	u_min, v_min, u_max, v_max = grid_lim
+	u = np.linspace(u_min, u_max, data.shape[0])
+	v = np.linspace(v_min, v_max, data.shape[1])
+
+	# Function to integrate over v for each u (i.e., for each row)
+	def integrand_v(v, u_idx):
+		v_grid = np.linspace(v_min, v_max, data.shape[1])
+		return np.interp(v, v_grid, data[u_idx, :])  # Interpolate data for the given v
+
+	# Integrate over v first (for each u), using adaptive quadrature
+	def integrate_v(u_idx):
+		result, _ = quad(integrand_v, v_min, v_max, args=(u_idx,), epsabs=eps, epsrel=eps)
+		return result
+
+	# Integrate over u (columns) using adaptive quadrature
+	I_v = np.array([integrate_v(u_idx) for u_idx in range(data.shape[0])])
+
+	# Now integrate over u (columns)
+	def integrand_u(u, I_v):
+		u_grid = np.linspace(u_min, u_max, len(I_v))
+		return np.interp(u, u_grid, I_v)  # Interpolate I_v for the given u
+
+	# Integrate along u using adaptive quadrature
+	I_uv, _ = quad(integrand_u, u_min, u_max, args=(I_v,), epsabs=eps, epsrel=eps)
+
+	return I_uv
+
+
+def uv_integrate(data, thetas_matrix, grid_lim, optimize=False):
 	'''
 	This function integrates a dataset over u and then over v.
 	The data must be given in a matrix format.
@@ -226,7 +303,10 @@ def uv_integrate(data, thetas_matrix, grid_lim):
 	The jacobian in terms of theta-phi is 
 	sin(theta)*d(theta)*d(phi) = cos(theta)*du*dv
 	'''
-	
+
+	if optimize:
+		return uv_integrate_optimized(data, thetas_matrix, grid_lim)
+
 	Npoints = data.shape
 	
 	try: data[data.mask==1] = 0 # removing masked elements
@@ -256,6 +336,4 @@ def uv_integrate(data, thetas_matrix, grid_lim):
 	I_uv = data_max * uv_area * fraction
 	
 	return I_uv
-
-			 
 

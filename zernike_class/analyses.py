@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import datetime as dt
 import json
 from astropy.io import fits as pyfits
@@ -16,13 +17,13 @@ plt.rcParams.update({"font.family": "serif", "font.serif": "Times New Roman"})
 class Beam_Zernike_Fit(object):
 
 	def __init__(self, beam_data, radius, beta_max, verbose=False, pol="co",
-				 indices=None, show_plot=False, fig_path=None, record_file=None):
+				 indices=None, show_plot=False, fig_path=None, record_file=None, optimize=False):
 	
 		assert isinstance(beam_data, bclass.Beam_Data)
 		assert radius>0
 		assert isinstance(beta_max, int)
 		assert isinstance(verbose,bool)
-		assert pol in ["co","cx"]
+		assert pol in ["co","cx","mueller"]
 		#assert indices
 		assert isinstance(show_plot,bool)
 		assert isinstance(fig_path,str)
@@ -40,23 +41,27 @@ class Beam_Zernike_Fit(object):
 		
 		if pol=="co":   self.data = np.sqrt(beam_data.co[0]**2 + beam_data.co[1]**2)
 		elif pol=="cx": self.data = np.sqrt(beam_data.cx[0]**2 + beam_data.cx[1]**2)
+		elif pol=="mueller": self.data_b = beam_data.co
 		
-		self.coeffs, self.reconstructed_beam = self.zernike_run(beam_data, verbose)
-		self.NRMS, self.res_power = self.error_analysis(beam_data, verbose)
+		self.coeffs, self.reconstructed_beam = self.zernike_run(beam_data, verbose, optimize=optimize)
+		self.NRMS, self.res_power = self.error_analysis(beam_data, verbose, optimize=optimize)
 		self.rec_power = 1-self.res_power
 		
 		if show_plot or not isinstance(fig_path, type(None)):
-			self.plot_results(beam_data, fig_path, verbose)
+			if pol=="mueller":
+				self.plot_results_mueller(beam_data, fig_path, verbose)
+			else:
+				self.plot_results(beam_data, fig_path, verbose)
 			
 		if not isinstance(record_file, type(None)):
 			self.fits_record(beam_data, record_file, verbose)
 		
 		
 		
-	def zernike_run(self, beam_data, verbose=False):
+	def zernike_run(self, beam_data, verbose=False, optimize=False):
 	
 		if isinstance(beam_data.thetaphi_grid, type(None)):
-			beam_data.generate_grid(fast=False, verbose=verbose)
+			beam_data.generate_grid(fast=False, verbose=verbose, optimize=optimize)
 		self.data = beam_data.circular_mask(self.radius, self.pol, verbose=verbose)
 
 		if type(self.indices)==type(None):
@@ -79,7 +84,7 @@ class Beam_Zernike_Fit(object):
 		
 		
 		
-	def error_analysis(self, beam_data, verbose=False):
+	def error_analysis(self, beam_data, verbose=False, optimize=False):
 	
 		Npoints = beam_data.Npoints		
 		grid_lim = beam_data.grid_lims
@@ -98,9 +103,9 @@ class Beam_Zernike_Fit(object):
 
 		# Reconstructed Power Fraction
 		thetas = thetaphi_coordinates[:,0].reshape(Npoints)
-		P_original = zk.grid_ops.uv_integrate(data_matrix**2, thetas, grid_lim)
-		P_res = zk.grid_ops.uv_integrate(residuals_matrix**2, thetas, grid_lim)
-		#P_reconstructed = zk.grid_ops.uv_integrate(beam_matrix**2, thetas, grid_lim)
+		P_original = zk.grid_ops.uv_integrate(data_matrix**2, thetas, grid_lim, optimize=optimize)
+		P_res = zk.grid_ops.uv_integrate(residuals_matrix**2, thetas, grid_lim, optimize=optimize)
+
 		if verbose:
 			print("\nOriginal Power: {}, Resisdual Power: {}".format(P_original, P_res))
 		res_power = P_res/P_original
@@ -169,8 +174,80 @@ class Beam_Zernike_Fit(object):
 		if fig_path==None: plt.show()
 		else:
 			if verbose: print("\nSaving figure as:\n{}".format(fig_path))
-			plt.savefig(fig_path)
+			plt.savefig(fig_path + "_{}GHz.png".format(frequency))
 			
+
+	def plot_results_mueller(self, beam_data, fig_path=None, verbose=False):
+		coordinates = beam_data.thetaphi_grid
+		grid_center = beam_data.grid_center
+		Npoints = beam_data.Npoints
+		frequency = beam_data.frequency
+		radius = self.radius
+		rec_power = self.rec_power
+		res_power = self.res_power
+		beta_max = self.beta_max
+		data = self.data
+		reconstructed_beam = self.reconstructed_beam
+
+		common_mask = reconstructed_beam.mask
+		data_m = np.ma.array(data, mask=common_mask).reshape(Npoints)
+		beam_m = np.ma.array(reconstructed_beam.data, mask=common_mask).reshape(Npoints)
+		res_m  = data_m - beam_m
+
+
+		if verbose: print("\nPlotting original and reconstructed beams...")
+		fig, axs = plt.subplots(ncols=3, sharex=True, sharey=True, figsize=(16,4))
+				
+		if verbose: print("\nConverting theta-phi to Alt-Az coordinates...")
+		theta = coordinates[:,0]
+		phi = coordinates[:,1]
+		thetaphi_center = zk.grid_ops.uv2thetaphi(grid_center)
+		XX = (-theta*np.cos(phi)).reshape(Npoints) # azimuth
+		YY = (theta*np.sin(phi)).reshape(Npoints)  # altitude
+		
+		altaz_center = [-thetaphi_center[0]*np.cos(thetaphi_center[1]), thetaphi_center[0]*np.sin(thetaphi_center[1])]
+		azmin, azmax = altaz_center[0]-radius, altaz_center[0]+radius
+		altmin, altmax = altaz_center[1]-radius, altaz_center[1]+radius
+
+		vmin_original = np.min(data_m)
+		vmax_original = np.max(data_m)
+		vmin_reconstructed = np.min(beam_m)
+		vmax_reconstructed = np.max(beam_m)
+		vmin_residuals = np.min(res_m)
+		vmax_residuals = np.max(res_m)
+
+		norm_original = mcolors.SymLogNorm(linthresh=1e-8, linscale=1, vmin=vmin_original, vmax=vmax_original, base=10)
+		norm_reconstructed = mcolors.SymLogNorm(linthresh=1e-8, linscale=1, vmin=vmin_reconstructed, vmax=vmax_reconstructed, base=10)
+		norm_residuals = mcolors.SymLogNorm(linthresh=1e-8, linscale=1, vmin=vmin_residuals, vmax=vmax_residuals, base=10)
+		
+		axs[0].set_title("Original Beam")
+		axs[1].set_title("Reconstructed Beam (" + r"$P_{rec}$=" + 
+							"{:.3f}%)".format(100*rec_power))
+		axs[2].set_title("Residuals (" + r"$P_{res}$=" +
+							"{:.3f}%)".format(100*res_power))
+		c1 = axs[0].pcolormesh(XX,YY,data_m, shading="auto", norm=norm_original, cmap='jet')
+		c2 = axs[1].pcolormesh(XX,YY,beam_m, shading="auto", norm=norm_reconstructed, cmap='jet')
+		c3 = axs[2].pcolormesh(XX,YY,res_m, shading="auto", norm=norm_residuals, cmap='jet')
+		cbar1 = fig.colorbar(c1, ax=axs[0])
+		cbar1.set_label("Amplitude")
+		cbar2 = fig.colorbar(c2, ax=axs[1])
+		cbar2.set_label("Amplitude")
+		cbar3 = fig.colorbar(c3,ax=axs[2])
+		cbar3.set_label("Amplitude")
+		axs[0].set_xlim(azmin, azmax)
+		axs[0].set_ylim(altmin, altmax)
+		axs[0].set_xlabel("Azimuth (rad)")
+		axs[0].set_ylabel("Elevation (rad)")
+		fig.suptitle("{} GHz Beam Resconstruction with R={} and  ".format(frequency,
+						radius) + r"$\beta_{max}$=" + "{}".format(beta_max))
+				# Exibindo ou salvando o gráfico
+		if fig_path is None:
+			plt.show()
+		else:
+			if verbose: 
+				print("\nSaving figure as:\n{}".format(fig_path))
+			plt.savefig(fig_path + "_{}GHz.png".format(frequency))
+
 			
 	def fits_record(self, beam_data, record_file, verbose=False):
 		
@@ -202,7 +279,7 @@ class Beam_Zernike_Fit(object):
 		hdu.header.comments["ttype3"] = "azimuthal index"
 		hdu.header["radius"] = str(self.radius)
 		hdu.header.comments["radius"] = "angular radius (rad)"
-		hdu.header["rec"] = str(rec_powers)
+		hdu.header["recmean"] = float(np.mean(rec_powers))
 		hdu.header["date"] = str(dt.date.today())
 		hdu_f = pyfits.BinTableHDU.from_columns([pyfits.Column(name="frequencies",
 												 format="D",
@@ -216,7 +293,7 @@ class Beam_Zernike_Fit(object):
 class Zernike_Analysis(object):
 
 	def __init__(self, radius, beta_max, filepath = "./", verbose=False, pol="co",
-				 indices=None, show_plot=False, record_file=None):
+				 indices=None, show_plot=False, record_file=None, optimize=False):
 		
 		self.radius     = radius
 		self.beta_max   = beta_max
@@ -234,9 +311,9 @@ class Zernike_Analysis(object):
 		
 		for i in range(len(grd_file.beams)):
 			beam = grd_file.beams[i]
-			fig_path = record_file + ".png" # TODO: problem for multifreq grd files
+			fig_path = record_file # + ".png" # TODO: problem for multifreq grd files
 			self.beam_zernike_fit.append(Beam_Zernike_Fit(beam, radius, beta_max, verbose,
-										 pol, indices, show_plot, fig_path))
+										 pol, indices, show_plot, fig_path, optimize=optimize))
 
 			self.Coeffs.append(self.beam_zernike_fit[i].coeffs)
 			self.NRMSs.append(self.beam_zernike_fit[i].NRMS)
@@ -281,7 +358,7 @@ class Zernike_Analysis(object):
 			hdu.header.comments["ttype3"] = "azimuthal index"
 			hdu.header["radius"] = str(self.radius)
 			hdu.header.comments["radius"] = "angular radius (rad)"
-			hdu.header["rec"] = str(self.rec_powers)
+			hdu.header["recmean"] = float(np.mean(self.rec_powers))
 			hdu.header["date"] = str(dt.date.today())
 			hdu_f = pyfits.BinTableHDU.from_columns([pyfits.Column(name="frequencies",
 													 format="D",

@@ -80,6 +80,8 @@ class Beam_Data(object):
 		self.field_components = cols.T
 		self.co = np.sqrt(cols[:,0:2].T[0]**2 + cols[:,0:2].T[1]**2)
 		self.cx = np.sqrt(cols[:,2:4].T[0]**2 + cols[:,2:4].T[1]**2)
+		# field components for mueller matrix components
+		self.mueller = cols[:,0:2].T[0]
 
 		self.grid_lims   = grid_lims
 		self.grid_center = grid_center  # center in UV coordinates
@@ -99,7 +101,7 @@ class Beam_Data(object):
 		self.valid_polar_grid = None
 	
 	
-	def generate_grid(self, fast=False, verbose=False):
+	def generate_grid(self, fast=False, verbose=False, optimize=False):
 	
 		grid_lim    = self.grid_lims
 		grid_center = self.grid_center
@@ -117,7 +119,7 @@ class Beam_Data(object):
 		else:
 			thetaphi_center = zk.grid_ops.uv2thetaphi(grid_center)
 			coordinates = zk.grid_ops.rotate_coords(thetaphi_coordinates, thetaphi_center,
-													verbose=verbose)
+													verbose=verbose, optimize=optimize)
 		self.uv_grid       = UV
 		self.thetaphi_grid = thetaphi_coordinates
 		self.polar_grid    = coordinates
@@ -126,6 +128,7 @@ class Beam_Data(object):
 	def circular_mask(self, radius, pol="co", verbose=False):
 	
 		if pol == "co": data = self.co
+		elif pol == "mueller": data = self.mueller
 		elif pol == "cx": data = self.cx
 		coordinates = self.polar_grid
 		data, coordinates = zk.grid_ops.circular_mask(data, coordinates, radius,
